@@ -24,8 +24,8 @@ func whenUsingKey() {
 func whenCopyKey() {
 	m := map[int]int{1: 1, 2: 2}
 	for key, value := range m {
-		key := key
-		delete(m, key) // want "function is called with a value different from range key"
+		newKey := key
+		delete(m, newKey) // want "function is called with a value different from range key"
 		fmt.Println(key, value)
 	}
 }
