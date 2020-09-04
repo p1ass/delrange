@@ -25,6 +25,16 @@ func whenCopyKey() {
 	m := map[int]int{1: 1, 2: 2}
 	for key, value := range m {
 		newKey := key
+		delete(m, newKey)
+		fmt.Println(key, value)
+	}
+}
+
+func whenCopyKeyAndAssignNewValueInToNewKey() {
+	m := map[int]int{1: 1, 2: 2}
+	for key, value := range m {
+		newKey := key
+		newKey = 1
 		delete(m, newKey) // want "function is called with a value different from range key"
 		fmt.Println(key, value)
 	}
@@ -34,7 +44,7 @@ func whenAssignBasicLit() {
 	m := map[int]int{1: 1, 2: 2}
 	for key, value := range m {
 		key = 1
-		delete(m, key)
+		delete(m, key) // want "function is called with a value different from range key"
 		fmt.Println(key, value)
 	}
 }
