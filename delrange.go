@@ -25,39 +25,36 @@ func run(pass *analysis.Pass) (interface{}, error) {
 	inspector := pass.ResultOf[inspect.Analyzer].(*inspector.Inspector)
 
 	nodeFilter := []ast.Node{
-		(*ast.ForStmt)(nil),
 		(*ast.RangeStmt)(nil),
 	}
 
 	inspector.Preorder(nodeFilter, func(n ast.Node) {
-		switch n := n.(type) {
-		case *ast.RangeStmt:
-			checkRangeStmt(pass, n)
+		rangeStmt, ok := n.(*ast.RangeStmt)
+		if !ok || rangeStmt == nil {
+			return
 		}
+
+		if _, ok := pass.TypesInfo.TypeOf(rangeStmt.X).(*types.Map); !ok {
+			return
+		}
+
+		ident, ok := rangeStmt.Key.(*ast.Ident)
+		if !ok || ident == nil {
+			return
+		}
+		assignStmt, ok := ident.Obj.Decl.(*ast.AssignStmt)
+		if !ok || assignStmt == nil {
+			return
+		}
+
+		keyIdent := getKeyIdent(assignStmt)
+		if keyIdent == nil {
+			return
+		}
+		reportUsingDeleteFuncWithIterationKey(pass, rangeStmt.Body, keyIdent)
 	})
 
 	return nil, nil
-}
-
-func checkRangeStmt(pass *analysis.Pass, rangeStmt *ast.RangeStmt) {
-	if _, ok := pass.TypesInfo.TypeOf(rangeStmt.X).(*types.Map); !ok {
-		return
-	}
-
-	ident, ok := rangeStmt.Key.(*ast.Ident)
-	if !ok || ident == nil {
-		return
-	}
-	assignStmt, ok := ident.Obj.Decl.(*ast.AssignStmt)
-	if !ok || assignStmt == nil {
-		return
-	}
-
-	keyIdent := getKeyIdent(assignStmt)
-	if keyIdent == nil {
-		return
-	}
-	reportUsingIterVarRef(pass, rangeStmt.Body, keyIdent)
 }
 
 func getKeyIdent(stmt *ast.AssignStmt) *ast.Ident {
@@ -77,36 +74,72 @@ func getKeyIdent(stmt *ast.AssignStmt) *ast.Ident {
 	return nil
 }
 
-func reportUsingIterVarRef(pass *analysis.Pass, body *ast.BlockStmt, keyIdent *ast.Ident) {
+func reportUsingDeleteFuncWithIterationKey(pass *analysis.Pass, body *ast.BlockStmt, keyIdent *ast.Ident) {
+	sameValueKeyIdents := map[*ast.Object]*ast.Ident{keyIdent.Obj: keyIdent}
+
 	ast.Inspect(body, func(n ast.Node) bool {
 		if n == nil {
 			return false
 		}
 
-		callExpr, ok := n.(*ast.CallExpr)
-		if !ok || callExpr == nil {
-			return true
-		}
+		switch n := n.(type) {
+		case *ast.AssignStmt:
+			updateSameValueKeyIdents(n, keyIdent, sameValueKeyIdents)
+		case *ast.CallExpr:
+			fun, ok := n.Fun.(*ast.Ident)
+			if !ok || fun == nil {
+				return true
+			}
 
-		fun, ok := callExpr.Fun.(*ast.Ident)
-		if !ok || fun == nil {
-			return true
-		}
+			if fun.Name != "delete" {
+				return true
+			}
 
-		if fun.Name != "delete" {
-			return true
-		}
+			if len(n.Args) != 2 {
+				return true
+			}
 
-		if len(callExpr.Args) != 2 {
-			return true
-		}
+			if secondArg, ok := n.Args[1].(*ast.Ident); ok {
+				for _, keyIdent := range sameValueKeyIdents {
+					if secondArg.Obj == keyIdent.Obj {
+						return true
+					}
+				}
+			}
 
-		if secondArg, ok := callExpr.Args[1].(*ast.Ident); ok && secondArg.Obj == keyIdent.Obj {
-			return true
+			pass.Reportf(fun.Pos(), "delete function is called with a value different from range key")
 		}
-
-		pass.Reportf(fun.Pos(), "delete function is called with a value different from range key")
 
 		return true
 	})
+}
+
+func updateSameValueKeyIdents(n *ast.AssignStmt, keyIdent *ast.Ident, sameValueKeyIdents map[*ast.Object]*ast.Ident) {
+	for i, r := range n.Rhs {
+		ident, ok := r.(*ast.Ident)
+		if !ok || ident == nil {
+			continue
+		}
+		if ident.Obj == keyIdent.Obj {
+			l := n.Lhs[i].(*ast.Ident)
+			sameValueKeyIdents[l.Obj] = l
+		}
+	}
+
+	for i, l := range n.Lhs {
+		li, ok := l.(*ast.Ident)
+		if !ok || li == nil {
+			continue
+		}
+		if _, ok := sameValueKeyIdents[li.Obj]; ok {
+			r := n.Rhs[i]
+			if ri, ok := r.(*ast.Ident); ok {
+				if _, exist := sameValueKeyIdents[ri.Obj]; exist {
+					continue
+				}
+			}
+			delete(sameValueKeyIdents, li.Obj)
+
+		}
+	}
 }
