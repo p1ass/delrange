@@ -9,7 +9,7 @@ import (
 	"golang.org/x/tools/go/ast/inspector"
 )
 
-const doc = "delrange is a static analysis tool which detects references to loop iterator variable."
+const doc = "delrange is a static analysis tool which detects delete function is called with a value different from range key."
 
 // Analyzer is ...
 var Analyzer = &analysis.Analyzer{
